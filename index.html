@@ -1,0 +1,565 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Invasores Retrô: Edição Glauber</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.7.77/Tone.js" defer></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap');
+
+        body {
+            background-color: #1a120b; /* Tom de madeira escura */
+            color: #e4dccf;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            margin: 0;
+            font-family: 'Press Start 2P', cursive;
+            overflow: hidden;
+            padding: 1rem;
+            box-sizing: border-box;
+        }
+
+        #game-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            width: 100%;
+            max-width: 800px;
+        }
+
+        #info-bar {
+            display: flex;
+            justify-content: space-between;
+            width: 100%;
+            padding: 10px 0;
+            margin-bottom: 10px;
+            box-sizing: border-box;
+            font-size: clamp(1rem, 2.5vw, 1.5rem);
+            color: #ffb84c;
+        }
+
+        canvas {
+            background-color: #000;
+            border: 2px solid #ffb84c; /* Laranja retrô */
+            border-radius: 10px;
+            box-shadow: 0 0 20px rgba(255, 184, 76, 0.5);
+            width: 100%;
+            height: auto;
+            aspect-ratio: 4 / 3;
+            image-rendering: pixelated; /* Mantém o estilo pixel art */
+        }
+        
+        #modal {
+            display: flex;
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.8);
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            text-align: center;
+            z-index: 10;
+        }
+        
+        #modal h1 {
+            font-size: clamp(2rem, 8vw, 4rem);
+            color: #ffb84c;
+            text-shadow: 3px 3px 0 #f16767;
+        }
+        
+        #modal p {
+             font-size: clamp(1rem, 3vw, 1.5rem);
+             margin-top: 0;
+        }
+
+        #modal button {
+            padding: 15px 30px;
+            font-size: clamp(1rem, 3vw, 1.5rem);
+            font-family: 'Press Start 2P', cursive;
+            color: #1a120b;
+            background-color: #ffb84c;
+            border: 3px solid #fff;
+            border-radius: 10px;
+            cursor: pointer;
+            box-shadow: 0 5px 0 #a45c40;
+            transition: all 0.1s ease-in-out;
+        }
+        
+        #modal button:active {
+            transform: translateY(5px);
+            box-shadow: none;
+        }
+        
+         #mobile-controls {
+            display: none; 
+            flex-direction: row;
+            justify-content: space-between;
+            width: 100%;
+            max-width: 800px;
+            padding: 10px 0;
+            margin-top: 10px;
+        }
+        
+        .mobile-btn {
+            width: 80px;
+            height: 80px;
+            background-color: rgba(255, 184, 76, 0.5);
+            color: white;
+            border-radius: 50%;
+            border: 2px solid #ffb84c;
+            font-size: 2rem;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            user-select: none;
+            box-shadow: 0 5px 0 #a45c40;
+        }
+        
+        #mobile-fire {
+           width: 100px;
+           height: 100px;
+           background-color: rgba(241, 103, 103, 0.5);
+           border-color: #f16767;
+           box-shadow: 0 5px 0 #c14b4b;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="game-container">
+        <div id="info-bar">
+            <div>Score: <span id="score">0</span></div>
+            <div>Lives: <span id="lives">3</span></div>
+        </div>
+        <canvas id="gameCanvas"></canvas>
+        <div id="mobile-controls">
+            <div id="move-left" class="mobile-btn">◀</div>
+            <div id="mobile-fire" class="mobile-btn">FIRE</div>
+            <div id="move-right" class="mobile-btn">▶</div>
+        </div>
+    </div>
+    <div id="modal">
+        <h1 id="modal-title">Invasores Retrô</h1>
+        <p id="modal-text">Use as setas para mover e Espaço para atirar.</p>
+        <button id="start-button">Iniciar Jogo</button>
+    </div>
+
+    <script>
+        window.onload = () => {
+
+            const canvas = document.getElementById('gameCanvas');
+            const ctx = canvas.getContext('2d');
+            const scoreEl = document.getElementById('score');
+            const livesEl = document.getElementById('lives');
+            const modal = document.getElementById('modal');
+            const modalTitle = document.getElementById('modal-title');
+            const modalText = document.getElementById('modal-text');
+            const startButton = document.getElementById('start-button');
+
+            let synth, noiseSynth;
+            let toneReady = false;
+            try {
+                if (typeof Tone !== 'undefined') {
+                    synth = new Tone.Synth({ oscillator: { type: 'square' }, envelope: { attack: 0.01, decay: 0.1, sustain: 0, release: 0.1 } }).toDestination();
+                    noiseSynth = new Tone.NoiseSynth({ noise: { type: 'white' }, envelope: { attack: 0.01, decay: 0.1, sustain: 0, release: 0.1 } }).toDestination();
+                    toneReady = true;
+                }
+            } catch (e) { console.error("Erro ao inicializar Tone.js."); }
+
+            // --- ESTADO E CONFIGURAÇÕES DO JOGO ---
+            let score, lives, level;
+            let gameActive, animationFrameId, invaderFireInterval;
+            let gameState = 'startScreen'; // startScreen, playing, levelComplete, gameOver
+
+            const player = { x: 0, y: 0, width: 60, height: 30, speed: 7, color: '#a45c40' };
+            const projectile = { width: 5, height: 15, speed: 10, color: '#3f3' };
+            let playerProjectile = null;
+            
+            const invader = { width: 30, height: 25 };
+            const invaderColors = ['#f16767', '#f5a25d', '#ffe17b', '#8de4ff', '#8da0ff'];
+            let invaders = [];
+            let invaderDirection = 1;
+            let invaderSpeed = 0.5;
+            let invaderDrop = 15;
+            let invaderProjectiles = [];
+
+            let bunkers = []; // Agora é um array plano de blocos
+            const keys = { right: false, left: false };
+
+            const letterPatterns = {
+                'G': ["01110", "10000", "10110", "10001", "01110"],
+                'L': ["10000", "10000", "10000", "10000", "11110"],
+                'A': ["01100", "10010", "11110", "10010", "10010"],
+                'U': ["10010", "10010", "10010", "10010", "01110"],
+                'B': ["11100", "10010", "11100", "10010", "11100"],
+                'E': ["11110", "10000", "11100", "10000", "11110"],
+                'R': ["11100", "10010", "11100", "10100", "10010"]
+            };
+            
+            // --- FUNÇÕES DE CONTROLE DE JOGO ---
+            
+            function startNewGame() {
+                resizeCanvas();
+                score = 0;
+                lives = 3;
+                level = 1;
+                invaderSpeed = 0.5;
+                startLevel();
+            }
+
+            function startLevel() {
+                player.x = canvas.width / 2 - player.width / 2;
+                playerProjectile = null;
+                invaderProjectiles = [];
+                createInvaders();
+                createBunkers();
+                updateHUD();
+                
+                modal.style.display = 'none';
+                gameActive = true;
+                gameState = 'playing';
+
+                if (animationFrameId) cancelAnimationFrame(animationFrameId);
+                if (invaderFireInterval) clearInterval(invaderFireInterval);
+                
+                invaderFireInterval = setInterval(invaderShoot, 1000);
+                gameLoop();
+            }
+            
+            function levelUp() {
+                 gameActive = false;
+                 gameState = 'levelComplete';
+                 level++;
+                 invaderSpeed += 0.3;
+                 modalTitle.textContent = "NÍVEL COMPLETO!";
+                 modalText.innerHTML = `Score: ${score}<br>Prepare-se para o nível ${level}`;
+                 startButton.textContent = "Próximo Nível";
+                 modal.style.display = 'flex';
+            }
+            
+            function gameOver(message) {
+                 gameActive = false;
+                 gameState = 'gameOver';
+                 if (animationFrameId) cancelAnimationFrame(animationFrameId);
+                 if (invaderFireInterval) clearInterval(invaderFireInterval);
+                 modal.style.display = 'flex';
+                 modalTitle.textContent = message;
+                 modalText.textContent = `Score final: ${score}`;
+                 startButton.textContent = "Jogar Novamente";
+            }
+
+            function gameLoop() {
+                if (!gameActive) return;
+                update();
+                draw();
+                animationFrameId = requestAnimationFrame(gameLoop);
+            }
+
+            // --- LÓGICA DE CRIAÇÃO DE ELEMENTOS ---
+
+            function createInvaders() {
+                invaders = [];
+                const rows = 5;
+                const cols = 8;
+                const startX = (canvas.width - (cols * (invader.width + 15))) / 2;
+                const startY = 50;
+                for (let row = 0; row < rows; row++) {
+                    for (let col = 0; col < cols; col++) {
+                        invaders.push({
+                            x: startX + col * (invader.width + 15),
+                            y: startY + row * (invader.height + 20),
+                            color: invaderColors[row % invaderColors.length]
+                        });
+                    }
+                }
+            }
+            
+            function createBunkers() {
+                bunkers = [];
+                const word = "GLAUBER";
+                const partSize = canvas.width / 80; // Tamanho do bloco responsivo
+                const letterWidth = 5;
+                const letterSpacing = 2;
+                const totalBlocksWidth = (word.length * letterWidth) + ((word.length - 1) * letterSpacing);
+                const totalPixelWidth = totalBlocksWidth * partSize;
+                let currentX = (canvas.width - totalPixelWidth) / 2;
+                const startY = player.y - 100;
+
+                for (const char of word) {
+                    const pattern = letterPatterns[char];
+                    if (pattern) {
+                        for (let row = 0; row < pattern.length; row++) {
+                            for (let col = 0; col < pattern[row].length; col++) {
+                                if (pattern[row][col] === '1') {
+                                    bunkers.push({
+                                        x: currentX + col * partSize,
+                                        y: startY + row * partSize,
+                                        width: partSize,
+                                        height: partSize,
+                                        health: 3
+                                    });
+                                }
+                            }
+                        }
+                    }
+                    currentX += (letterWidth + letterSpacing) * partSize;
+                }
+            }
+            
+            // --- LÓGICA DE ATUALIZAÇÃO E MOVIMENTO ---
+
+            function update() {
+                if (keys.right && player.x < canvas.width - player.width) player.x += player.speed;
+                if (keys.left && player.x > 0) player.x -= player.speed;
+
+                if (playerProjectile) {
+                    playerProjectile.y -= playerProjectile.speed;
+                    if (playerProjectile.y < 0) playerProjectile = null;
+                }
+
+                invaderProjectiles.forEach((p, i) => {
+                    p.y += p.speed;
+                    if (p.y > canvas.height) invaderProjectiles.splice(i, 1);
+                });
+
+                let hitWall = false;
+                invaders.forEach(inv => {
+                    inv.x += invaderSpeed * invaderDirection;
+                    if (inv.x <= 0 || inv.x + invader.width >= canvas.width) hitWall = true;
+                    if (inv.y + invader.height >= player.y) gameOver("Os invasores chegaram!");
+                });
+
+                if (hitWall) {
+                    invaderDirection *= -1;
+                    invaders.forEach(inv => { inv.y += invaderDrop; });
+                }
+
+                collisionDetection();
+
+                if (invaders.length === 0 && gameActive) {
+                    levelUp();
+                }
+            }
+            
+            function invaderShoot() {
+                if (!gameActive || invaders.length === 0) return;
+                const shootingInvader = invaders[Math.floor(Math.random() * invaders.length)];
+                invaderProjectiles.push({
+                    x: shootingInvader.x + invader.width / 2 - projectile.width / 2,
+                    y: shootingInvader.y + invader.height,
+                    width: projectile.width, height: projectile.height, speed: 5, color: '#f33'
+                });
+            }
+            
+            // --- DETECÇÃO DE COLISÃO ---
+
+            function checkCollision(a, b) {
+                return a.x < b.x + b.width && a.x + a.width > b.x && a.y < b.y + b.height && a.y + a.height > b.y;
+            }
+
+            function collisionDetection() {
+                // Projétil do jogador vs Invasores e Bunkers
+                if (playerProjectile) {
+                    for (let i = invaders.length - 1; i >= 0; i--) {
+                        if (checkCollision(playerProjectile, { ...invaders[i], ...invader })) {
+                            if (toneReady) noiseSynth.triggerAttack();
+                            invaders.splice(i, 1);
+                            playerProjectile = null;
+                            score += 10;
+                            updateHUD();
+                            return; // Sai da função para evitar colisões múltiplas
+                        }
+                    }
+                    for (let i = bunkers.length - 1; i >= 0; i--) {
+                        if (checkCollision(playerProjectile, bunkers[i])) {
+                             bunkers[i].health--;
+                             if(bunkers[i].health <= 0) bunkers.splice(i, 1);
+                             playerProjectile = null;
+                             return;
+                        }
+                    }
+                }
+                
+                // Projéteis dos invasores vs Jogador e Bunkers
+                 for (let i = invaderProjectiles.length - 1; i >= 0; i--) {
+                    if (checkCollision(invaderProjectiles[i], player)) {
+                        invaderProjectiles.splice(i, 1);
+                        playerHit();
+                        return;
+                    }
+                     for (let j = bunkers.length - 1; j >= 0; j--) {
+                         if(checkCollision(invaderProjectiles[i], bunkers[j])) {
+                             bunkers[j].health--;
+                             if(bunkers[j].health <= 0) bunkers.splice(j, 1);
+                             invaderProjectiles.splice(i, 1);
+                             break; // Sai do loop interno e continua com o próximo projétil
+                         }
+                     }
+                 }
+            }
+
+            function playerHit() {
+                if (toneReady) synth.triggerAttackRelease("C2", "8n");
+                lives--;
+                updateHUD();
+                if (lives <= 0) gameOver("Fim de Jogo!");
+                else {
+                    let originalColor = player.color;
+                    player.color = "#f00";
+                    setTimeout(() => { player.color = originalColor; }, 200);
+                }
+            }
+            
+            function updateHUD() {
+                scoreEl.textContent = score;
+                livesEl.textContent = lives;
+            }
+            
+            // --- FUNÇÕES DE DESENHO ---
+            function draw() {
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                drawBackground();
+                drawPlayer();
+                if(playerProjectile) {
+                    ctx.fillStyle = projectile.color;
+                    ctx.fillRect(playerProjectile.x, playerProjectile.y, playerProjectile.width, playerProjectile.height);
+                }
+                invaderProjectiles.forEach(p => {
+                    ctx.fillStyle = p.color;
+                    ctx.fillRect(p.x, p.y, p.width, p.height);
+                });
+                invaders.forEach(inv => drawInvader(inv));
+                drawBunkers();
+            }
+
+            function drawBackground() {
+                ctx.strokeStyle = "rgba(255, 184, 76, 0.1)";
+                ctx.lineWidth = 2;
+                for(let i = 1; i <= 6; i++) {
+                    const x = (canvas.width / 7) * i;
+                    ctx.beginPath();
+                    ctx.moveTo(x, 0);
+                    ctx.lineTo(x, canvas.height);
+                    ctx.stroke();
+                }
+            }
+
+            function drawPlayer() {
+                ctx.fillStyle = player.color;
+                const p = player;
+                ctx.beginPath();
+                ctx.moveTo(p.x, p.y + p.height);
+                ctx.lineTo(p.x, p.y + p.height * 0.2);
+                ctx.quadraticCurveTo(p.x, p.y, p.x + p.width * 0.2, p.y);
+                ctx.lineTo(p.x + p.width * 0.8, p.y);
+                ctx.quadraticCurveTo(p.x + p.width, p.y, p.x + p.width, p.y + p.height * 0.2);
+                ctx.lineTo(p.x + p.width, p.y + p.height);
+                ctx.closePath();
+                ctx.fill();
+
+                ctx.fillStyle = '#e4dccf';
+                ctx.fillRect(p.x - 5, p.y + 5, 5, 10);
+                ctx.fillRect(p.x - 5, p.y + 20, 5, 10);
+                ctx.fillRect(p.x + p.width, p.y + 5, 5, 10);
+                ctx.fillRect(p.x + p.width, p.y + 20, 5, 10);
+            }
+
+            function drawInvader(inv) {
+                const i = { ...inv, ...invader };
+                ctx.fillStyle = i.color;
+                ctx.beginPath();
+                ctx.moveTo(i.x, i.y + i.height * 0.2);
+                ctx.lineTo(i.x + i.width / 2, i.y);
+                ctx.lineTo(i.x + i.width, i.y + i.height * 0.2);
+                ctx.lineTo(i.x + i.width * 0.8, i.y + i.height);
+                ctx.lineTo(i.x + i.width * 0.2, i.y + i.height);
+                ctx.closePath();
+                ctx.fill();
+            }
+
+            function drawBunkers() {
+                bunkers.forEach(bunker => {
+                    ctx.fillStyle = `rgba(164, 92, 64, ${bunker.health / 3})`;
+                    ctx.fillRect(bunker.x, bunker.y, bunker.width, bunker.height);
+                });
+            }
+            
+            // --- EVENT LISTENERS E CONTROLES ---
+            function handleKeyDown(e) {
+                if (e.code === 'ArrowRight' || e.key === 'd') keys.right = true;
+                if (e.code === 'ArrowLeft' || e.key === 'a') keys.left = true;
+                if (e.code === 'Space') {
+                    e.preventDefault(); 
+                    shoot();
+                }
+            }
+            
+            function handleKeyUp(e) {
+                if (e.code === 'ArrowRight' || e.key === 'd') keys.right = false;
+                if (e.code === 'ArrowLeft' || e.key === 'a') keys.left = false;
+            }
+            
+            function shoot() {
+                 if (!gameActive || playerProjectile) return;
+                 if(toneReady) synth.triggerAttackRelease("C5", "32n");
+                 playerProjectile = {
+                     x: player.x + player.width / 2 - projectile.width / 2,
+                     y: player.y, ...projectile
+                 };
+            }
+            
+            function setupMobileControls() {
+                if ('ontouchstart' in window || navigator.maxTouchPoints > 0) {
+                    document.getElementById('mobile-controls').style.display = 'flex';
+                    const leftBtn = document.getElementById('move-left');
+                    const rightBtn = document.getElementById('move-right');
+                    const fireBtn = document.getElementById('mobile-fire');
+                    leftBtn.addEventListener('touchstart', (e) => { e.preventDefault(); keys.left = true; });
+                    leftBtn.addEventListener('touchend', (e) => { e.preventDefault(); keys.left = false; });
+                    rightBtn.addEventListener('touchstart', (e) => { e.preventDefault(); keys.right = true; });
+                    rightBtn.addEventListener('touchend', (e) => { e.preventDefault(); keys.right = false; });
+                    fireBtn.addEventListener('touchstart', (e) => { e.preventDefault(); shoot(); });
+                }
+            }
+            
+            function resizeCanvas() {
+                const containerWidth = canvas.parentElement.clientWidth;
+                canvas.width = containerWidth;
+                canvas.height = containerWidth * (3 / 4);
+                player.y = canvas.height - player.height - 10;
+                if(gameActive) {
+                    createBunkers();
+                    draw();
+                }
+            }
+
+            // --- INICIALIZAÇÃO ---
+            startButton.addEventListener('click', () => {
+                if (toneReady && Tone.context.state !== 'running') {
+                    Tone.start().catch(e => console.error("Tone.start() falhou", e));
+                }
+
+                if (gameState === 'startScreen' || gameState === 'gameOver') {
+                    startNewGame();
+                } else if (gameState === 'levelComplete') {
+                    startLevel();
+                }
+            });
+
+            window.addEventListener('resize', resizeCanvas);
+            document.addEventListener('keydown', handleKeyDown);
+            document.addEventListener('keyup', handleKeyUp);
+            setupMobileControls();
+            resizeCanvas(); 
+        };
+    </script>
+
+</body>
+</html>
